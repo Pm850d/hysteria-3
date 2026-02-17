@@ -258,7 +258,6 @@ func (c *clientConfig) fillConnFactory(hyConfig *client.Config) error {
         if err != nil {
             return configError{Field: "obfs.vex3.password", Err: err}
         }
-        hyConfig.Obfs = ob
         return nil
 	default:
 		return configError{Field: "obfs.type", Err: errors.New("unsupported obfuscation type")}
