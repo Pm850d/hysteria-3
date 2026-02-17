@@ -280,7 +280,7 @@ func (c *serverConfig) fillConn(hyConfig *server.Config) error {
 		}
 		hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
 		return nil
-	case "vex3":  // ← ДОБАВИТЬ ЭТОТ БЛОК
+	case "vex3":
         ob, err := obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
         if err != nil {
             return configError{Field: "obfs.vex3.password", Err: err}

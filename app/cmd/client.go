@@ -92,8 +92,9 @@ type clientConfigObfsSalamander struct {
 }
 
 type clientConfigObfs struct {
-	Type       string                     `mapstructure:"type"`
-	Salamander clientConfigObfsSalamander `mapstructure:"salamander"`
+    Type       string                    `mapstructure:"type"`
+    Salamander clientConfigObfsSalamander `mapstructure:"salamander"`
+    Vex3       clientConfigObfsSalamander `mapstructure:"vex3"`
 }
 
 type clientConfigTLS struct {
@@ -252,6 +253,13 @@ func (c *clientConfig) fillConnFactory(hyConfig *client.Config) error {
 		if err != nil {
 			return configError{Field: "obfs.salamander.password", Err: err}
 		}
+	case "vex3":  // ← ДОБАВИТЬ ЭТОТ БЛОК
+        ob, err := obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
+        if err != nil {
+            return configError{Field: "obfs.vex3.password", Err: err}
+        }
+        hyConfig.Obfs = ob
+        return nil
 	default:
 		return configError{Field: "obfs.type", Err: errors.New("unsupported obfuscation type")}
 	}
