@@ -79,33 +79,30 @@ type serverConfigObfsSalamander struct {
 }
 
 type serverConfigObfs struct {
-	Type       string                     `mapstructure:"type"`
-	Salamander serverConfigObfsSalamander `mapstructure:"salamander"`
+    Type       string                     `mapstructure:"type"`
+    Salamander serverConfigObfsSalamander `mapstructure:"salamander"`
+    Vex3       serverConfigObfsSalamander `mapstructure:"vex3"`
 }
 
 type serverConfigTLS struct {
 	Cert     string `mapstructure:"cert"`
 	Key      string `mapstructure:"key"`
-	SNIGuard string `mapstructure:"sniGuard"` // "disable", "dns-san", "strict"
+	SNIGuard string `mapstructure:"sniGuard"`
 	ClientCA string `mapstructure:"clientCA"`
 }
 
 type serverConfigACME struct {
-	// Common fields
 	Domains    []string `mapstructure:"domains"`
 	Email      string   `mapstructure:"email"`
 	CA         string   `mapstructure:"ca"`
 	ListenHost string   `mapstructure:"listenHost"`
 	Dir        string   `mapstructure:"dir"`
 
-	// Type selection
 	Type string               `mapstructure:"type"`
 	HTTP serverConfigACMEHTTP `mapstructure:"http"`
 	TLS  serverConfigACMETLS  `mapstructure:"tls"`
 	DNS  serverConfigACMEDNS  `mapstructure:"dns"`
 
-	// Legacy fields for backwards compatibility
-	// Only applicable when Type is empty
 	DisableHTTP    bool `mapstructure:"disableHTTP"`
 	DisableTLSALPN bool `mapstructure:"disableTLSALPN"`
 	AltHTTPPort    int  `mapstructure:"altHTTPPort"`
@@ -283,6 +280,13 @@ func (c *serverConfig) fillConn(hyConfig *server.Config) error {
 		}
 		hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
 		return nil
+	case "vex3":  // ← ДОБАВИТЬ ЭТОТ БЛОК
+        ob, err := obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
+        if err != nil {
+            return configError{Field: "obfs.vex3.password", Err: err}
+        }
+        hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
+        return nil
 	default:
 		return configError{Field: "obfs.type", Err: errors.New("unsupported obfuscation type")}
 	}
