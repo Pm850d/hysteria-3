@@ -1,15 +1,15 @@
-﻿server: xn--80abela2a5a6e.xn--p1ai:443
+﻿server: 150.241.115.73:443
 
-auth: SecureClient2026!Pass
+auth: 'SecureClient2026!Pass'
 
 tls:
-  sni: xn--80abela2a5a6e.xn--p1ai
-  insecure: false
+  sni: 150.241.115.73
+  insecure: true
 
 obfs:
   type: vex3
-  salamander:
-    password: "Kj8#mN2@qR9&wT3!xY6^bC1*dF4"
+  vex3:
+    password: 'Kj8#mN2$pL5@qR9&wT3!xY6^bC1*dF4'
 
 cc: bbr
 
