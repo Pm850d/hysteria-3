@@ -80,8 +80,12 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
+	github.com/apernet/hysteria/extras/v2/obfs v0.0.0
 )
 
 replace github.com/apernet/hysteria/core/v2 => ../core
 
 replace github.com/apernet/hysteria/extras/v2 => ../extras
+
+replace github.com/apernet/hysteria/extras/v2/obfs => ./extras/v2/obfs
+

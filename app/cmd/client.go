@@ -484,7 +484,7 @@ func runClient(cmd *cobra.Command, args []string) {
 	if err := viper.Unmarshal(&config); err != nil {
 		logger.Fatal("failed to parse client config", zap.Error(err))
 	}
-
+	fmt.Printf("[CORE] Creating QUIC connection to %s...\n", config.Server)
 	c, err := client.NewReconnectableClient(
 		config.Config,
 		func(c client.Client, info *client.HandshakeInfo, count int) {
@@ -498,8 +498,10 @@ func runClient(cmd *cobra.Command, args []string) {
 			}
 		}, config.Lazy)
 	if err != nil {
+		fmt.Printf("[CORE] Client initialization FAILED: %v\n", err)
 		logger.Fatal("failed to initialize client", zap.Error(err))
 	}
+	fmt.Printf("[CORE] Client initialized successfully!\n")
 	defer c.Close()
 
 	uri := config.URI()
@@ -569,7 +571,7 @@ func runClient(cmd *cobra.Command, args []string) {
 		if r.OK {
 			logger.Info(r.Msg)
 		} else {
-			_ = c.Close() // Close the client here as Fatal will exit the program without running defer
+			_ = c.Close()
 			if r.Err != nil {
 				logger.Fatal(r.Msg, zap.Error(r.Err))
 			} else {
@@ -899,18 +901,25 @@ type adaptiveConnFactory struct {
 }
 
 func (f *adaptiveConnFactory) New(addr net.Addr) (net.PacketConn, error) {
+	fmt.Printf("[CLIENT] Creating connection to %v\n", addr)
 	if f.Obfuscator == nil {
-		return f.NewFunc(addr)
+		conn, err := f.NewFunc(addr)
+		fmt.Printf("[CLIENT] Conn created (no obfs): %v, err=%v\n", conn, err)
+		return conn, err
 	} else {
 		conn, err := f.NewFunc(addr)
+		fmt.Printf("[CLIENT] Raw conn: %v, err=%v\n", conn, err)
 		if err != nil {
 			return nil, err
 		}
-		return obfs.WrapPacketConn(conn, f.Obfuscator), nil
+		wrapped := obfs.WrapPacketConn(conn, f.Obfuscator)
+		fmt.Printf("[CLIENT] Wrapped with obfs: %v\n", wrapped)
+		return wrapped, nil
 	}
 }
 
 func connectLog(info *client.HandshakeInfo, count int) {
+	fmt.Printf("[CLIENT] *** CONNECTED TO SERVER *** udp=%v, tx=%v, count=%v\n", info.UDPEnabled, info.Tx, count)
 	logger.Info("connected to server",
 		zap.Bool("udpEnabled", info.UDPEnabled),
 		zap.Uint64("tx", info.Tx),

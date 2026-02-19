@@ -1,24 +1,25 @@
-﻿server: 150.241.115.73:443
-
-auth: 'SecureClient2026!Pass'
+﻿server: 150.241.115.73:8443
 
 tls:
-  sni: 150.241.115.73
   insecure: true
 
 obfs:
   type: vex3
   vex3:
-    password: 'Kj8#mN2$pL5@qR9&wT3!xY6^bC1*dF4'
+    password: "Kj8#mN2$pL5@qR9&wT3!xY6^bC1*dF4"
 
-cc: bbr
+auth: "SecureClient2026!Pass"
 
 bandwidth:
-  up: 50 mbps
-  down: 200 mbps
+  up: 10 mbps
+  down: 15 mbps
+
+quic:
+  keepAlive: true
+  maxIdleTimeout: 120s
 
 socks5:
-  listen: 127.0.0.1:10808
+  listen: 127.0.0.1:1080
 
-log:
-  level: info
+http:
+  listen: 127.0.0.1:8080
