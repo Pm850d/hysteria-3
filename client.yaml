@@ -1,4 +1,4 @@
-﻿server: 150.241.115.73:8443
+﻿server: 81.85.73.220:8443
 
 tls:
   insecure: true
@@ -10,13 +10,6 @@ obfs:
 
 auth: "SecureClient2026!Pass"
 
-bandwidth:
-  up: 10 mbps
-  down: 15 mbps
-
-quic:
-  keepAlive: true
-  maxIdleTimeout: 120s
 
 socks5:
   listen: 127.0.0.1:1080

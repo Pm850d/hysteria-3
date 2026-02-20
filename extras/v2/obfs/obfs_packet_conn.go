@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"fmt"
+	"errors"
 )
 
 const (

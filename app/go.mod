@@ -8,6 +8,7 @@ require (
 	github.com/apernet/go-tproxy v0.0.0-20230809025308-8f4723fd742f
 	github.com/apernet/hysteria/core/v2 v2.0.0-00010101000000-000000000000
 	github.com/apernet/hysteria/extras/v2 v2.0.0-00010101000000-000000000000
+	github.com/apernet/hysteria/extras/v2/obfs v0.0.0-00010101000000-000000000000
 	github.com/apernet/sing-tun v0.2.6-0.20250920121535-299f04629986
 	github.com/caddyserver/certmagic v0.17.2
 	github.com/libdns/cloudflare v0.1.1
@@ -80,12 +81,10 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
-	github.com/apernet/hysteria/extras/v2/obfs v0.0.0
 )
 
 replace github.com/apernet/hysteria/core/v2 => ../core
 
 replace github.com/apernet/hysteria/extras/v2 => ../extras
 
-replace github.com/apernet/hysteria/extras/v2/obfs => ./extras/v2/obfs
-
+replace github.com/apernet/hysteria/extras/v2/obfs => ../extras/v2/obfs
