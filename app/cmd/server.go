@@ -79,9 +79,18 @@ type serverConfigObfsSalamander struct {
 }
 
 type serverConfigObfs struct {
-    Type       string                     `mapstructure:"type"`
-    Salamander serverConfigObfsSalamander `mapstructure:"salamander"`
-    Vex3       serverConfigObfsSalamander `mapstructure:"vex3"`
+	Type       string                     `mapstructure:"type"`
+	Salamander serverConfigObfsSalamander `mapstructure:"salamander"`
+	Vex3       serverConfigObfsSalamander `mapstructure:"vex3"`
+	Mini       serverConfigObfsSalamander `mapstructure:"mini"`
+	Vex3Mini   serverConfigObfsSalamander `mapstructure:"vex3mini"`
+}
+
+func (c serverConfigObfs) miniPassword() string {
+	if c.Mini.Password != "" {
+		return c.Mini.Password
+	}
+	return c.Vex3Mini.Password
 }
 
 type serverConfigTLS struct {
@@ -281,12 +290,23 @@ func (c *serverConfig) fillConn(hyConfig *server.Config) error {
 		hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
 		return nil
 	case "vex3":
-        ob, err := obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
-        if err != nil {
-            return configError{Field: "obfs.vex3.password", Err: err}
-        }
-        hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
-        return nil
+		ob, err := obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
+		if err != nil {
+			return configError{Field: "obfs.vex3.password", Err: err}
+		}
+		hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
+		return nil
+	case "mini", "vex3mini":
+		ob, err := obfs.NewMiniObfuscator([]byte(c.Obfs.miniPassword()))
+		if err != nil {
+			field := "obfs.mini.password"
+			if strings.ToLower(c.Obfs.Type) == "vex3mini" {
+				field = "obfs.vex3mini.password"
+			}
+			return configError{Field: field, Err: err}
+		}
+		hyConfig.Conn = obfs.WrapPacketConn(conn, ob)
+		return nil
 	default:
 		return configError{Field: "obfs.type", Err: errors.New("unsupported obfuscation type")}
 	}

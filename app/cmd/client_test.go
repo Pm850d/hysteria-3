@@ -171,6 +171,48 @@ func TestClientConfigURI(t *testing.T) {
 			},
 		},
 		{
+			uri:   "hysteria2://noauth.com/?obfs=vex3&obfs-password=vex3secret",
+			uriOK: true,
+			config: &clientConfig{
+				Server: "noauth.com",
+				Auth:   "",
+				Obfs: clientConfigObfs{
+					Type: "vex3",
+					Vex3: clientConfigObfsSalamander{
+						Password: "vex3secret",
+					},
+				},
+			},
+		},
+		{
+			uri:   "hysteria2://noauth.com/?obfs=mini&obfs-password=minisecret",
+			uriOK: true,
+			config: &clientConfig{
+				Server: "noauth.com",
+				Auth:   "",
+				Obfs: clientConfigObfs{
+					Type: "mini",
+					Mini: clientConfigObfsSalamander{
+						Password: "minisecret",
+					},
+				},
+			},
+		},
+		{
+			uri:   "hysteria2://noauth.com/?obfs=vex3mini&obfs-password=aliassecret",
+			uriOK: true,
+			config: &clientConfig{
+				Server: "noauth.com",
+				Auth:   "",
+				Obfs: clientConfigObfs{
+					Type: "vex3mini",
+					Mini: clientConfigObfsSalamander{
+						Password: "aliassecret",
+					},
+				},
+			},
+		},
+		{
 			uri:    "invalid.bs",
 			uriOK:  false,
 			config: nil,

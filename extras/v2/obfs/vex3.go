@@ -40,7 +40,6 @@ var sha256Pool = sync.Pool{
 	New: func() interface{} { return sha256.New() },
 }
 
-// V8 OPT: Пул для параметров
 var paramsPool = sync.Pool{
 	New: func() interface{} {
 		return &Vex3Params{}
@@ -89,18 +88,16 @@ func (o *Vex3Obfuscator) getSeq() int {
 	return int(seqVal)
 }
 
-// V8 OPT: Keystream генератор для шифрования
+// Inline value-type generator
 type keystreamGen struct {
-	gen *XorShift128
+	gen XorShift128
 	buf uint64
 	pos int
 }
 
-func newKeystreamGen(seed []byte) *keystreamGen {
-	return &keystreamGen{
-		gen: newXorShift128(seed),
-		pos: 8, // Force new random on first call
-	}
+func initKeystreamGen(k *keystreamGen, seed []byte) {
+	initXorShift128(&k.gen, seed)
+	k.pos = 8 // Force new random on first call
 }
 
 func (k *keystreamGen) nextByte() byte {
@@ -122,30 +119,63 @@ func (o *Vex3Obfuscator) Obfuscate(in, out []byte) int {
 		return 0
 	}
 
-	// Записываем seq
 	binary.LittleEndian.PutUint32(out[:vex3SeqLen], uint32(seq))
 
-	// V8 OPT: Генерируем параметры и keystream на лету
 	var seedBuf [32]byte
 	seedBytes := o.makeSeed(minute, seq, seedBuf[:])
 	params := o.generateParams(seedBytes)
 	defer paramsPool.Put(params)
 
-	ks := newKeystreamGen(seedBytes)
+	var ks keystreamGen
+	initKeystreamGen(&ks, seedBytes)
 
-	// Шифрование с keystream на лету
+	// Inlined encryption loop
 	for i := 0; i < len(in); i++ {
 		v := in[i]
-		for _, opCode := range params.OpsCodes {
-			v = o.applyOp(v, params, ks, i, opCode)
+		for j := 0; j < params.OpsLen; j++ {
+			switch params.OpsCodes[j] {
+			case OpXRot:
+				k := ks.nextByte()
+				shift := ks.nextByte() & 7
+				v = rotl8(v^k, shift)
+			case OpF1:
+				t := v ^ params.Mask1
+				t = t*params.Mul1 + params.Add1
+				t = t ^ uint8(i)
+				v = params.SBox[t]
+			case OpF2:
+				t := v + uint8(i*13)
+				t = t ^ params.Mask2
+				v = rotl8(t, params.Shift2)
+			case OpF3:
+				v = (v * params.Mul3) ^ (params.Add3 + uint8(i))
+			case OpF4:
+				v = v ^ rotl8(params.Mask4, uint8(i&7))
+			case OpF5:
+				t := rotl8(v, params.Shift5)
+				v = t + params.Add5
+			case OpSwapNibbles:
+				v = ((v << 4) & 0xF0) | ((v >> 4) & 0x0F)
+			case OpReverseBits:
+				b := v
+				b = (b&0xF0)>>4 | (b&0x0F)<<4
+				b = (b&0xCC)>>2 | (b&0x33)<<2
+				b = (b&0xAA)>>1 | (b&0x55)<<1
+				v = b
+			case OpShuffleBits:
+				res := uint8(0)
+				for srcIdx := 0; srcIdx < 8; srcIdx++ {
+					res |= ((v >> srcIdx) & 1) << params.Perm[srcIdx]
+				}
+				v = res
+			}
 		}
 		out[vex3SeqLen+i] = v
 	}
 
-	// MAC вычисляется на header + ciphertext
-	var macBuf [16]byte
+	var macBuf [32]byte
 	o.computeMac(out[:vex3SeqLen+len(in)], minute, seq, macBuf[:])
-	copy(out[vex3SeqLen+len(in):], macBuf[:])
+	copy(out[vex3SeqLen+len(in):], macBuf[:vex3MacLen])
 
 	return required
 }
@@ -163,12 +193,14 @@ func (o *Vex3Obfuscator) Deobfuscate(in, out []byte) int {
 	seq := int(binary.LittleEndian.Uint32(in[:vex3SeqLen]))
 	nowMin := int(time.Now().Unix() / 60)
 
-	for offset := -vex3TimeWin; offset <= vex3TimeWin; offset++ {
+	// Fast-path time window iteration: current, -1, 1, -2, 2
+	offsets := [5]int{0, -1, 1, -2, 2}
+	for _, offset := range offsets {
 		tryMin := nowMin + offset
 
-		var expectedMac [16]byte
+		var expectedMac [32]byte
 		o.computeMac(in[:vex3SeqLen+bodyLen], tryMin, seq, expectedMac[:])
-		if !hmac.Equal(expectedMac[:], in[vex3SeqLen+bodyLen:]) {
+		if !hmac.Equal(expectedMac[:vex3MacLen], in[vex3SeqLen+bodyLen:]) {
 			continue
 		}
 
@@ -187,12 +219,50 @@ func (o *Vex3Obfuscator) decryptBytes(data []byte, minute, seq, bodyLen int, out
 	params := o.generateParams(seedBytes)
 	defer paramsPool.Put(params)
 
-	ks := newKeystreamGen(seedBytes)
+	var ks keystreamGen
+	initKeystreamGen(&ks, seedBytes)
 
+	// Inlined decryption loop
 	for i := 0; i < bodyLen; i++ {
 		v := data[vex3SeqLen+i]
-		for j := len(params.OpsCodes) - 1; j >= 0; j-- {
-			v = o.applyOpInv(v, params, ks, i, params.OpsCodes[j])
+		for j := params.OpsLen - 1; j >= 0; j-- {
+			switch params.OpsCodes[j] {
+			case OpXRot:
+				k := ks.nextByte()
+				shift := ks.nextByte() & 7
+				v = rotr8(v, shift) ^ k
+			case OpF1:
+				t := params.InvSBox[v]
+				t = (t ^ uint8(i)) - params.Add1
+				t = t * params.Mul1Inv
+				v = t ^ params.Mask1
+			case OpF2:
+				t := rotr8(v, params.Shift2)
+				t = t ^ params.Mask2
+				v = t - uint8(i*13)
+			case OpF3:
+				t := v ^ (params.Add3 + uint8(i))
+				v = t * params.Mul3Inv
+			case OpF4:
+				v = v ^ rotl8(params.Mask4, uint8(i&7))
+			case OpF5:
+				t := v - params.Add5
+				v = rotr8(t, params.Shift5)
+			case OpSwapNibbles:
+				v = ((v << 4) & 0xF0) | ((v >> 4) & 0x0F)
+			case OpReverseBits:
+				b := v
+				b = (b&0xF0)>>4 | (b&0x0F)<<4
+				b = (b&0xCC)>>2 | (b&0x33)<<2
+				b = (b&0xAA)>>1 | (b&0x55)<<1
+				v = b
+			case OpShuffleBits:
+				res := uint8(0)
+				for srcIdx := 0; srcIdx < 8; srcIdx++ {
+					res |= ((v >> srcIdx) & 1) << params.InvPerm[srcIdx]
+				}
+				v = res
+			}
 		}
 		out[i] = v
 	}
@@ -205,16 +275,16 @@ func (o *Vex3Obfuscator) makeSeed(minute, seq int, out []byte) []byte {
 	defer sha256Pool.Put(h)
 	h.Reset()
 
-	h.Write(o.Key)
-	h.Write([]byte{'|'})
+	var buf [64]byte
+	n := copy(buf[:], o.Key)
+	buf[n] = '|'
+	n++
+	n += binary.PutVarint(buf[n:], int64(minute))
+	buf[n] = '|'
+	n++
+	n += binary.PutVarint(buf[n:], int64(seq))
 
-	var buf [20]byte
-	n := binary.PutVarint(buf[:], int64(minute))
 	h.Write(buf[:n])
-	h.Write([]byte{'|'})
-	n = binary.PutVarint(buf[:], int64(seq))
-	h.Write(buf[:n])
-
 	return h.Sum(out[:0])
 }
 
@@ -223,12 +293,14 @@ func (o *Vex3Obfuscator) computeMac(body []byte, minute, seq int, out []byte) {
 	defer o.hmacPool.Put(h)
 	h.Reset()
 
-	h.Write([]byte{'|'})
-	var buf [20]byte
-	n := binary.PutVarint(buf[:], int64(minute))
-	h.Write(buf[:n])
-	h.Write([]byte{'|'})
-	n = binary.PutVarint(buf[:], int64(seq))
+	var buf [64]byte
+	buf[0] = '|'
+	n := 1
+	n += binary.PutVarint(buf[n:], int64(minute))
+	buf[n] = '|'
+	n++
+	n += binary.PutVarint(buf[n:], int64(seq))
+
 	h.Write(buf[:n])
 	h.Write(body)
 
@@ -237,8 +309,8 @@ func (o *Vex3Obfuscator) computeMac(body []byte, minute, seq int, out []byte) {
 }
 
 type Vex3Params struct {
-	Ops      []string
-	OpsCodes []int
+	OpsCodes [16]int
+	OpsLen   int
 	Mask1    uint8
 	Mul1     uint8
 	Mul1Inv  uint8
@@ -253,18 +325,17 @@ type Vex3Params struct {
 	Shift5   uint8
 	Add5     uint8
 	Perm     [8]uint8
+	InvPerm  [8]uint8
 	SBox     [256]uint8
 	InvSBox  [256]uint8
 }
 
 func (o *Vex3Obfuscator) generateParams(seedBytes []byte) *Vex3Params {
 	params := paramsPool.Get().(*Vex3Params)
-	params.Ops = params.Ops[:0]
-	params.OpsCodes = params.OpsCodes[:0]
 
-	// V8 OPT: Генерируем первые 128 байт keystream для параметров
 	var ks [128]uint8
-	gen := newXorShift128(seedBytes)
+	var gen XorShift128
+	initXorShift128(&gen, seedBytes)
 	for i := 0; i < 128; i += 8 {
 		v := gen.Next()
 		for j := 0; j < 8 && i+j < 128; j++ {
@@ -296,6 +367,11 @@ func (o *Vex3Obfuscator) generateParams(seedBytes []byte) *Vex3Params {
 	}
 	params.Perm = perm
 
+	// Precalculate InvPerm
+	for i, p := range perm {
+		params.InvPerm[p] = uint8(i)
+	}
+
 	sbox := [256]uint8{}
 	for i := 0; i < 256; i++ {
 		sbox[i] = uint8(i)
@@ -309,123 +385,21 @@ func (o *Vex3Obfuscator) generateParams(seedBytes []byte) *Vex3Params {
 		params.InvSBox[sbox[i]] = uint8(i)
 	}
 
-	opPool := []string{"xrot", "f1", "f2", "f3", "f4", "f5", "swap_nibbles", "reverse_bits", "shuffle_bits"}
+	opPool := [9]int{OpXRot, OpF1, OpF2, OpF3, OpF4, OpF5, OpSwapNibbles, OpReverseBits, OpShuffleBits}
 	length := int(ks[0]%5) + 5
 	if length > len(opPool) {
 		length = len(opPool)
 	}
 	rotOffset := int(ks[1] % uint8(len(opPool)))
 
-	if cap(params.Ops) < length {
-		params.Ops = make([]string, length)
-	} else {
-		params.Ops = params.Ops[:length]
-	}
+	params.OpsLen = length
 
 	for i := 0; i < length; i++ {
 		idx := (rotOffset + i) % len(opPool)
-		params.Ops[i] = opPool[idx]
-	}
-
-	if cap(params.OpsCodes) < length {
-		params.OpsCodes = make([]int, length)
-	} else {
-		params.OpsCodes = params.OpsCodes[:length]
-	}
-
-	for i, op := range params.Ops {
-		switch op {
-		case "xrot":
-			params.OpsCodes[i] = OpXRot
-		case "f1":
-			params.OpsCodes[i] = OpF1
-		case "f2":
-			params.OpsCodes[i] = OpF2
-		case "f3":
-			params.OpsCodes[i] = OpF3
-		case "f4":
-			params.OpsCodes[i] = OpF4
-		case "f5":
-			params.OpsCodes[i] = OpF5
-		case "swap_nibbles":
-			params.OpsCodes[i] = OpSwapNibbles
-		case "reverse_bits":
-			params.OpsCodes[i] = OpReverseBits
-		case "shuffle_bits":
-			params.OpsCodes[i] = OpShuffleBits
-		}
+		params.OpsCodes[i] = opPool[idx]
 	}
 
 	return params
-}
-
-// V8 OPT: applyOp с keystream генератором
-func (o *Vex3Obfuscator) applyOp(v uint8, params *Vex3Params, ks *keystreamGen, i int, opCode int) uint8 {
-	switch opCode {
-	case OpXRot:
-		k := ks.nextByte()
-		shift := ks.nextByte() & 7
-		return rotl8(v^k, shift)
-	case OpF1:
-		t := (v ^ params.Mask1) & 0xFF
-		t = (t*params.Mul1 + params.Add1) & 0xFF
-		t = (t ^ uint8(i&0xFF)) & 0xFF
-		return params.SBox[t]
-	case OpF2:
-		t := (v + uint8((i*13)&0xFF)) & 0xFF
-		t = t ^ params.Mask2
-		return rotl8(t, params.Shift2)
-	case OpF3:
-		return ((v * params.Mul3) & 0xFF) ^ ((params.Add3 + uint8(i)) & 0xFF)
-	case OpF4:
-		return v ^ rotl8(params.Mask4, uint8(i&7))
-	case OpF5:
-		t := rotl8(v, params.Shift5)
-		return (t + params.Add5) & 0xFF
-	case OpSwapNibbles:
-		return swapNibbles(v)
-	case OpReverseBits:
-		return reverseBits(v)
-	case OpShuffleBits:
-		return shuffleBits(v, params.Perm)
-	default:
-		return v
-	}
-}
-
-// V8 OPT: applyOpInv с keystream генератором
-func (o *Vex3Obfuscator) applyOpInv(v uint8, params *Vex3Params, ks *keystreamGen, i int, opCode int) uint8 {
-	switch opCode {
-	case OpXRot:
-		k := ks.nextByte()
-		shift := ks.nextByte() & 7
-		return rotr8(v, shift) ^ k
-	case OpF1:
-		t := params.InvSBox[v]
-		t = ((t ^ uint8(i&0xFF)) - params.Add1) & 0xFF
-		t = (t * params.Mul1Inv) & 0xFF
-		return t ^ params.Mask1
-	case OpF2:
-		t := rotr8(v, params.Shift2)
-		t = t ^ params.Mask2
-		return (t - uint8((i*13)&0xFF)) & 0xFF
-	case OpF3:
-		t := v ^ ((params.Add3 + uint8(i)) & 0xFF)
-		return (t * params.Mul3Inv) & 0xFF
-	case OpF4:
-		return v ^ rotl8(params.Mask4, uint8(i&7))
-	case OpF5:
-		t := (v - params.Add5) & 0xFF
-		return rotr8(t, params.Shift5)
-	case OpSwapNibbles:
-		return swapNibbles(v)
-	case OpReverseBits:
-		return reverseBits(v)
-	case OpShuffleBits:
-		return unshuffleBits(v, params.Perm)
-	default:
-		return v
-	}
 }
 
 func rotl8(b uint8, r uint8) uint8 {
@@ -438,46 +412,16 @@ func rotr8(b uint8, r uint8) uint8 {
 	return (b >> r) | (b << (8 - r))
 }
 
-func swapNibbles(b uint8) uint8 {
-	return ((b << 4) & 0xF0) | ((b >> 4) & 0x0F)
-}
-
-func reverseBits(b uint8) uint8 {
-	b = (b&0xF0)>>4 | (b&0x0F)<<4
-	b = (b&0xCC)>>2 | (b&0x33)<<2
-	b = (b&0xAA)>>1 | (b&0x55)<<1
-	return b
-}
-
-func shuffleBits(b uint8, perm [8]uint8) uint8 {
-	var res uint8 = 0
-	for srcIdx := 0; srcIdx < 8; srcIdx++ {
-		bit := (b >> srcIdx) & 1
-		res |= (bit << perm[srcIdx])
-	}
-	return res
-}
-
-func unshuffleBits(b uint8, perm [8]uint8) uint8 {
-	inv := [8]uint8{}
-	for i, p := range perm {
-		inv[p] = uint8(i)
-	}
-	return shuffleBits(b, inv)
-}
-
 type XorShift128 struct {
 	a uint64
 	b uint64
 }
 
-func newXorShift128(seed []byte) *XorShift128 {
+func initXorShift128(x *XorShift128, seed []byte) {
 	var padded [16]byte
 	copy(padded[:], seed)
-	return &XorShift128{
-		a: binary.LittleEndian.Uint64(padded[:8]),
-		b: binary.LittleEndian.Uint64(padded[8:16]),
-	}
+	x.a = binary.LittleEndian.Uint64(padded[:8])
+	x.b = binary.LittleEndian.Uint64(padded[8:16])
 }
 
 func (x *XorShift128) Next() uint64 {

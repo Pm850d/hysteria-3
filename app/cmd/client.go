@@ -92,9 +92,18 @@ type clientConfigObfsSalamander struct {
 }
 
 type clientConfigObfs struct {
-    Type       string                    `mapstructure:"type"`
-    Salamander clientConfigObfsSalamander `mapstructure:"salamander"`
-    Vex3       clientConfigObfsSalamander `mapstructure:"vex3"`
+	Type       string                     `mapstructure:"type"`
+	Salamander clientConfigObfsSalamander `mapstructure:"salamander"`
+	Vex3       clientConfigObfsSalamander `mapstructure:"vex3"`
+	Mini       clientConfigObfsSalamander `mapstructure:"mini"`
+	Vex3Mini   clientConfigObfsSalamander `mapstructure:"vex3mini"`
+}
+
+func (c clientConfigObfs) miniPassword() string {
+	if c.Mini.Password != "" {
+		return c.Mini.Password
+	}
+	return c.Vex3Mini.Password
 }
 
 type clientConfigTLS struct {
@@ -254,10 +263,19 @@ func (c *clientConfig) fillConnFactory(hyConfig *client.Config) error {
 			return configError{Field: "obfs.salamander.password", Err: err}
 		}
 	case "vex3":
-        ob, err = obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
-        if err != nil {
-            return configError{Field: "obfs.vex3.password", Err: err}
-        }
+		ob, err = obfs.NewVex3Obfuscator([]byte(c.Obfs.Vex3.Password))
+		if err != nil {
+			return configError{Field: "obfs.vex3.password", Err: err}
+		}
+	case "mini", "vex3mini":
+		ob, err = obfs.NewMiniObfuscator([]byte(c.Obfs.miniPassword()))
+		if err != nil {
+			field := "obfs.mini.password"
+			if strings.ToLower(c.Obfs.Type) == "vex3mini" {
+				field = "obfs.vex3mini.password"
+			}
+			return configError{Field: field, Err: err}
+		}
 	default:
 		return configError{Field: "obfs.type", Err: errors.New("unsupported obfuscation type")}
 	}
@@ -382,6 +400,12 @@ func (c *clientConfig) URI() string {
 	case "salamander":
 		q.Set("obfs", "salamander")
 		q.Set("obfs-password", c.Obfs.Salamander.Password)
+	case "vex3":
+		q.Set("obfs", "vex3")
+		q.Set("obfs-password", c.Obfs.Vex3.Password)
+	case "mini", "vex3mini":
+		q.Set("obfs", strings.ToLower(c.Obfs.Type))
+		q.Set("obfs-password", c.Obfs.miniPassword())
 	}
 	if c.TLS.SNI != "" {
 		q.Set("sni", c.TLS.SNI)
@@ -435,10 +459,15 @@ func (c *clientConfig) parseURI() bool {
 	c.Server = u.Host
 	q := u.Query()
 	if obfsType := q.Get("obfs"); obfsType != "" {
+		obfsType = strings.ToLower(obfsType)
 		c.Obfs.Type = obfsType
-		switch strings.ToLower(obfsType) {
+		switch obfsType {
 		case "salamander":
 			c.Obfs.Salamander.Password = q.Get("obfs-password")
+		case "vex3":
+			c.Obfs.Vex3.Password = q.Get("obfs-password")
+		case "mini", "vex3mini":
+			c.Obfs.Mini.Password = q.Get("obfs-password")
 		}
 	}
 	if sni := q.Get("sni"); sni != "" {
